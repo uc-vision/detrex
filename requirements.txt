@@ -15,4 +15,3 @@ wandb
 submitit
 einops
 fairscale
-maskdino_project @ file:./projects/maskdino

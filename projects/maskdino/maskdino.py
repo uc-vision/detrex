@@ -7,18 +7,14 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from detectron2.config import configurable
-from detectron2.data import MetadataCatalog
 from detectron2.data.detection_utils import convert_image_to_rgb
-from detectron2.modeling import META_ARCH_REGISTRY, build_backbone, build_sem_seg_head
+from detectron2.modeling import META_ARCH_REGISTRY
 from detectron2.modeling.backbone import Backbone
 from detectron2.modeling.postprocessing import sem_seg_postprocess
-from detectron2.structures import Boxes, ImageList, Instances, BitMasks
+from detectron2.structures import Boxes, ImageList, Instances
 from detectron2.utils.memory import retry_if_cuda_oom
 from detectron2.utils.events import get_event_storage
 
-from .modeling.criterion import SetCriterion
-from .modeling.matcher import HungarianMatcher
 from .utils import box_ops
 
 
@@ -118,7 +114,10 @@ class MaskDINO(nn.Module):
             print('criterion.weight_dict ', self.criterion.weight_dict)
 
         self.vis_period = vis_period
-        self._vis_iter = 0
+        self._init_visualiser = None
+        if self.vis_period > 0:
+            from detectron2.utils.visualizer import Visualizer
+            self._init_visualiser = Visualizer
 
     @property
     def device(self):
@@ -168,8 +167,7 @@ class MaskDINO(nn.Module):
             else:
                 targets = None
             outputs,mask_dict = self.sem_seg_head(features,targets=targets)
-            if self.vis_period > 0:
-                self._vis_iter = 0
+            if self._init_visualiser is not None:
                 storage = get_event_storage()
                 if storage.iter % self.vis_period == 0:
                     # Visualise output to wandb.
@@ -210,10 +208,9 @@ class MaskDINO(nn.Module):
 
             del outputs
             results = self.inference(mask_cls_results, mask_pred_results, mask_box_results, batched_inputs, images.image_sizes)
-            if self.vis_period > 0:
-                if self._vis_iter % self.vis_period == 0:
-                    self.visualise_training(batched_inputs, results, train=False)
-                self._vis_iter += 1
+            if self._init_visualiser is not None:
+                # Always visualise evaluation results.
+                self.visualise_training(batched_inputs, results, train=False)
 
             return results
 
@@ -435,7 +432,6 @@ class MaskDINO(nn.Module):
 
     def visualise_training(self, batched_inputs, results, train: bool = True):
         """ Visualise input to wandb. Based on DINO at https://github.com/IDEA-Research/detrex/blob/main/projects/dino/modeling/dino.py"""
-        from detectron2.utils.visualizer import Visualizer
 
         storage = get_event_storage()
         max_vis_box = 20
@@ -443,16 +439,19 @@ class MaskDINO(nn.Module):
         for batch_input, results_per_image in zip(batched_inputs, results):
             img = batch_input['image']
             img = convert_image_to_rgb(img.permute(1, 2, 0), 'RGB')
-            v_gt = Visualizer(img, None)
+            v_gt = self._init_visualiser(img, None)
             v_gt = v_gt.overlay_instances(boxes=batch_input['instances'].gt_boxes, masks=batch_input['instances'].gt_masks)
             anno_img = v_gt.get_image()            
-            v_pred = Visualizer(img, None)
+            v_pred = self._init_visualiser(img, None)
             # Sort results to show top 20 best.
             results = results_per_image['instances'][torch.argsort(results_per_image['instances'].scores, descending=True)[:max_vis_box]]
             v_pred = v_pred.overlay_instances(boxes=results.pred_boxes.tensor.detach().cpu().numpy(), masks=results.pred_masks.detach().cpu().numpy())
             pred_img = v_pred.get_image()
             vis_img1 = np.concatenate((anno_img, pred_img), axis=1)
             vis_img = vis_img1.transpose(2, 0, 1)
-            vis_name = f'{"(Train)" if train else "(Eval)"} Left: GT bounding boxes;  Right: predicted boxes'
+            if train:
+                vis_name = 'Train Left: GT bounding boxes;  Right: predicted boxes'
+            else:
+                vis_name = f'Evaluation predictions for {batch_input["file_name"]}. \nLeft: GT bounding boxes;  Right: predicted boxes'
             storage.put_image(vis_name, vis_img)
             break  # Only visualise one image per batch.

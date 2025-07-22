@@ -450,7 +450,7 @@ class MaskDINO(nn.Module):
             vis_img1 = np.concatenate((anno_img, pred_img), axis=1)
             vis_img = vis_img1.transpose(2, 0, 1)
             if train:
-                vis_name = 'Train Left: GT bounding boxes;  Right: predicted boxes'
+                vis_name = f'{batch_input["file_name"]}\nTrain Left: GT bounding boxes;  Right: predicted boxes'
             else:
                 vis_name = f'Evaluation predictions for {batch_input["file_name"]}. \nLeft: GT bounding boxes;  Right: predicted boxes'
             storage.put_image(vis_name, vis_img)

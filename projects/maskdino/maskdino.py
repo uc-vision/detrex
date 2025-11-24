@@ -434,7 +434,7 @@ class MaskDINO(nn.Module):
         """ Visualise input to wandb. Based on DINO at https://github.com/IDEA-Research/detrex/blob/main/projects/dino/modeling/dino.py"""
 
         storage = get_event_storage()
-        max_vis_box = 20
+        max_vis_box = 400
 
         for batch_input, results_per_image in zip(batched_inputs, results):
             img = batch_input['image']
@@ -443,7 +443,7 @@ class MaskDINO(nn.Module):
             v_gt = v_gt.overlay_instances(boxes=batch_input['instances'].gt_boxes, masks=batch_input['instances'].gt_masks)
             anno_img = v_gt.get_image()            
             v_pred = self._init_visualiser(img, None)
-            # Sort results to show top 20 best.
+            # Sort results to show top 400 best.
             results = results_per_image['instances'][torch.argsort(results_per_image['instances'].scores, descending=True)[:max_vis_box]]
             v_pred = v_pred.overlay_instances(boxes=results.pred_boxes.tensor.detach().cpu().numpy(), masks=results.pred_masks.detach().cpu().numpy())
             pred_img = v_pred.get_image()
